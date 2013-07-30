@@ -63,7 +63,7 @@ whereis_service(Service) when is_atom(Service) ->
 
 request_notification(Service, Fun) when is_atom(Service) andalso is_function(Fun, 1) ->
 	request_notification(Service, Fun, ?DEFAULT_NOTIFICATION_NODES).
-	
+
 request_notification(Service, Fun, Nodes) when is_atom(Service) andalso is_function(Fun, 1) andalso is_list(Nodes)->
 	gen_server:call(?MODULE, {request_notification, Service, Fun, Nodes}).
 
@@ -84,7 +84,7 @@ init([]) ->
 	TimerInterval = application:get_env(?APP_NAME, ?CONFIG_REFRESH, ?DEFAULT_REFRESH),
 	{ok, Timer} = timer:send_interval(TimerInterval, {run_update}),
 	error_logger:info_msg("Just one more thing, ~p [~p] is starting...\n", [?MODULE, self()]),
-    {ok, run_update(#state{known_nodes=KnownNodes, nodes=dict:new(), services=dict:new(), requests=dict:new(), timer=Timer})}.
+	{ok, run_update(#state{known_nodes=KnownNodes, nodes=dict:new(), services=dict:new(), requests=dict:new(), timer=Timer})}.
 
 %% handle_call
 handle_call({whereis_service, Service}, From, State=#state{services=Services}) ->
@@ -92,7 +92,7 @@ handle_call({whereis_service, Service}, From, State=#state{services=Services}) -
 	{noreply, State};
 
 handle_call({get_known_nodes}, _From, State=#state{known_nodes=KnownNodes}) ->
-    {reply, KnownNodes, State};
+	{reply, KnownNodes, State};
 
 handle_call({refresh}, _From, State) ->
 	NState = run_update(State),
@@ -115,7 +115,7 @@ handle_call({request_notification, Service, Fun, Nodes}, _From, State=#state{kno
 
 %% handle_cast
 handle_cast({add_node, Node}, State=#state{known_nodes=KnownNodes}) ->
-    {noreply, State#state{known_nodes=join([Node], KnownNodes)}};
+	{noreply, State#state{known_nodes=join([Node], KnownNodes)}};
 
 handle_cast({add_node, Service, Ref, Node}, State=#state{known_nodes=KnownNodes, requests=Requests}) ->
 	NKnownNodes = join([Node], KnownNodes),
@@ -148,7 +148,7 @@ handle_cast({delete_node, Service, Ref, Node}, State=#state{requests=Requests}) 
 
 handle_cast({delete_node, Node}, State=#state{known_nodes=KnownNodes}) ->
 	NKnownNodes = lists:delete(Node, KnownNodes),
-    {noreply, State#state{known_nodes=NKnownNodes}};
+	{noreply, State#state{known_nodes=NKnownNodes}};
 
 handle_cast({delete_notification, Service, Ref}, State=#state{requests=Requests}) ->
 	NRequests = case dict:find(Service, Requests) of
@@ -160,21 +160,21 @@ handle_cast({delete_notification, Service, Ref}, State=#state{requests=Requests}
 				_ -> dict:store(Service, Request#request{notifications=Notifications}, Requests)
 			end
 	end,
-    {noreply, State#state{requests=NRequests}}.
+	{noreply, State#state{requests=NRequests}}.
 
 %% handle_info
 handle_info({run_update}, State) ->
 	NState = run_update(State),
-    {noreply, NState}.
+	{noreply, NState}.
 
 %% terminate
 terminate(_Reason, #state{timer=Timer}) ->
 	timer:cancel(Timer),
-    ok.
+	ok.
 
 %% code_change
 code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+	{ok, State}.
 
 %% ====================================================================
 %% Internal functions
@@ -182,17 +182,17 @@ code_change(_OldVsn, State, _Extra) ->
 
 run_whereis_service(Service, Services, From) ->
 	Fun = fun() ->
-		LocalServices = erlang:registered(),
-		Local = case lists:member(Service, LocalServices) of
-			true -> [node()];
-			false -> []
-		end,
-		Remote = case dict:find(Service, Services) of
-			error -> [];
-			{ok, Nodes} -> Nodes
-		end,
-		Reply = Local ++ Remote,
-		gen_server:reply(From, Reply)
+			LocalServices = erlang:registered(),
+			Local = case lists:member(Service, LocalServices) of
+				true -> [node()];
+				false -> []
+			end,
+			Remote = case dict:find(Service, Services) of
+				error -> [];
+				{ok, Nodes} -> Nodes
+			end,
+			Reply = Local ++ Remote,
+			gen_server:reply(From, Reply)
 	end,
 	spawn(Fun).
 
@@ -244,7 +244,7 @@ add_services([Service|T], Node, Services) ->
 		{ok, NodeList} -> dict:store(Service, [Node|NodeList], Services)
 	end,
 	add_services(T, Node, NServices).
-			
+
 process_notifications(OldServices, NewServices, Requests) ->
 	Services = dict:fetch_keys(Requests),
 	notifications_for_service(Services, OldServices, NewServices, Requests).
@@ -289,15 +289,18 @@ send_notification(Service, [{Ref, Notification}|TN], [Node|TD], NodesDone, Type)
 	send_notification(Service, [Notification|TN], TD, [Node|NodesDone], Type).
 
 notify(Service, Ref, Fun, Node, new) ->
-	try Fun({new, Service, Ref, Node})
-	catch
-		_:_ -> ok
-	end;
+	run(Fun, {new, Service, Ref, Node});
 notify(Service, Ref, Fun, Node, remove) ->
-	try Fun({remove, Service, Ref, Node})
-	catch
-		_:_ -> ok
-	end.
+	run(Fun, {remove, Service, Ref, Node}).
+
+run(Fun, Arg) ->
+	F = fun() ->
+			try Fun(Arg)
+			catch
+				_:_ -> ok
+			end
+	end,
+	spawn(F).
 
 not_in([], NotInList, _RefList) -> NotInList;
 not_in([Value|T], NotInList, RefList) ->
