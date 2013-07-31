@@ -25,7 +25,7 @@
 -define(CONFIG_MASTER_NODES, master_nodes).
 -define(DEFAULT_REFRESH, 30000).
 
--define(DEFAULT_NOTIFICATION_NODES, []).
+-define(ALL_NOTIFICATION_NODES, []).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
@@ -34,7 +34,7 @@
 %% ====================================================================
 -export([start_link/0, refresh/0]).
 -export([add_node/1, add_node/3, delete_node/1, delete_node/3, known_nodes/0]).
--export([whereis_service/1]).
+-export([whereis_service/1, whereis_service/2]).
 -export([request_notification/2, request_notification/3, delete_notification/2]).
 
 start_link() ->
@@ -59,10 +59,13 @@ known_nodes() ->
 	gen_server:call(?MODULE, {get_known_nodes}).
 
 whereis_service(Service) when is_atom(Service) ->
-	gen_server:call(?MODULE, {whereis_service, Service}).
+	whereis_service(Service, true).
+
+whereis_service(Service, IncludeLocal) when is_atom(Service) andalso is_boolean(IncludeLocal) ->
+	gen_server:call(?MODULE, {whereis_service, Service, IncludeLocal}).
 
 request_notification(Service, Fun) when is_atom(Service) andalso is_function(Fun, 1) ->
-	request_notification(Service, Fun, ?DEFAULT_NOTIFICATION_NODES).
+	request_notification(Service, Fun, ?ALL_NOTIFICATION_NODES).
 
 request_notification(Service, Fun, Nodes) when is_atom(Service) andalso is_function(Fun, 1) andalso is_list(Nodes)->
 	gen_server:call(?MODULE, {request_notification, Service, Fun, Nodes}).
@@ -87,8 +90,8 @@ init([]) ->
 	{ok, run_update(#state{known_nodes=KnownNodes, nodes=dict:new(), services=dict:new(), requests=dict:new(), timer=Timer})}.
 
 %% handle_call
-handle_call({whereis_service, Service}, From, State=#state{services=Services}) ->
-	run_whereis_service(Service, Services, From),
+handle_call({whereis_service, Service, IncludeLocal}, From, State=#state{services=Services}) ->
+	run_whereis_service(Service, IncludeLocal, Services, From),
 	{noreply, State};
 
 handle_call({get_known_nodes}, _From, State=#state{known_nodes=KnownNodes}) ->
@@ -98,7 +101,7 @@ handle_call({refresh}, _From, State) ->
 	NState = run_update(State),
 	{reply, ok, NState};
 
-handle_call({request_notification, Service, Fun, Nodes}, _From, State=#state{known_nodes=KnownNodes, requests=Requests}) ->
+handle_call({request_notification, Service, Fun, Nodes}, _From, State=#state{known_nodes=KnownNodes, services=Services, requests=Requests}) ->
 	Ref = erlang:make_ref(),
 	Notification = #notification{function=Fun, requested_nodes=Nodes},
 	NKnownNodes = join(Nodes, KnownNodes),
@@ -111,7 +114,12 @@ handle_call({request_notification, Service, Fun, Nodes}, _From, State=#state{kno
 			Notifications = dict:store(Ref, Notification, Request#request.notifications),
 			dict:store(Service, Request#request{notifications=Notifications}, Requests)
 	end,	
-	{reply, Ref, State#state{known_nodes=NKnownNodes, requests=NRequests}}.
+	RemoteNodes = whereis_service(Service, false, Services),
+	RequestedNodes = case Nodes of
+		?ALL_NOTIFICATION_NODES -> RemoteNodes;
+		_ -> common(RemoteNodes, [], Nodes)
+	end,
+	{reply, {Ref, RequestedNodes}, State#state{known_nodes=NKnownNodes, requests=NRequests}}.
 
 %% handle_cast
 handle_cast({add_node, Node}, State=#state{known_nodes=KnownNodes}) ->
@@ -180,21 +188,26 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %% ====================================================================
 
-run_whereis_service(Service, Services, From) ->
+run_whereis_service(Service, IncludeLocal, Services, From) ->
 	Fun = fun() ->
-			LocalServices = erlang:registered(),
-			Local = case lists:member(Service, LocalServices) of
-				true -> [node()];
-				false -> []
-			end,
-			Remote = case dict:find(Service, Services) of
-				error -> [];
-				{ok, Nodes} -> Nodes
-			end,
-			Reply = Local ++ Remote,
+			Reply = whereis_service(Service, IncludeLocal, Services),
 			gen_server:reply(From, Reply)
 	end,
 	spawn(Fun).
+
+whereis_service(Service, false, Services) ->
+	case dict:find(Service, Services) of
+		error -> [];
+		{ok, Nodes} -> Nodes
+	end;
+whereis_service(Service, true, Services) ->
+	LocalServices = erlang:registered(),
+	Local = case lists:member(Service, LocalServices) of
+		true -> [node()];
+		false -> []
+	end,
+	Remote = whereis_service(Service, false, Services),
+	Local ++ Remote.
 
 get_master_nodes() ->
 	case application:get_env(?APP_NAME, ?CONFIG_MASTER_NODES) of
@@ -278,7 +291,7 @@ send_notification(Service, [_Notification|TN], [], NodesDone, Type) ->
 	send_notification(Service, TN, NodesDone, [], Type);
 send_notification(Service, [{Ref, Notification}|TN], [Node|TD], NodesDone, Type) ->
 	case Notification#notification.requested_nodes of
-		?DEFAULT_NOTIFICATION_NODES -> 
+		?ALL_NOTIFICATION_NODES -> 
 			notify(Service, Ref, Notification#notification.function, Node, Type);
 		_ ->
 			case lists:member(Node, Notification#notification.requested_nodes) of
@@ -307,4 +320,12 @@ not_in([Value|T], NotInList, RefList) ->
 	case lists:member(Value, RefList) of
 		true -> not_in(T, NotInList, RefList);
 		false -> not_in(T, [Value|NotInList], RefList)
+	end.
+
+common(_List, _CommonList, []) -> [];
+common([], CommonList, _RefList) -> CommonList;
+common([Value|T], CommonList, RefList) ->
+	case lists:member(Value, RefList) of
+		true -> common(T, [Value|CommonList], RefList);
+		false -> common(T, CommonList, RefList)
 	end.
