@@ -33,7 +33,7 @@
 %% API functions
 %% ====================================================================
 -export([start_link/0, refresh/0]).
--export([add_node/1, add_node/3, delete_node/1, delete_node/3, known_nodes/0]).
+-export([add_node/1, delete_node/1, change_nodes/3, known_nodes/0]).
 -export([whereis_service/1, whereis_service/2]).
 -export([request_notification/2, request_notification/3, delete_notification/2]).
 
@@ -46,14 +46,11 @@ refresh() ->
 add_node(Node) when is_atom(Node) ->
 	gen_server:cast(?MODULE, {add_node, Node}).
 
-add_node(Service, Ref, Node) when is_atom(Service) andalso is_reference(Ref) andalso is_atom(Node) ->
-	gen_server:cast(?MODULE, {add_node, Service, Ref, Node}).
-
 delete_node(Node) when is_atom(Node) ->
 	gen_server:cast(?MODULE, {delete_node, Node}).
 
-delete_node(Service, Ref, Node) when is_atom(Service) andalso is_reference(Ref) andalso is_atom(Node) ->
-	gen_server:cast(?MODULE, {delete_node, Service, Ref, Node}).
+change_nodes(Service, Ref, Nodes) when is_atom(Service) andalso is_reference(Ref) andalso is_list(Nodes) ->
+	gen_server:cast(?MODULE, {change_nodes, Service, Ref, Nodes}).
 
 known_nodes() ->
 	gen_server:call(?MODULE, {get_known_nodes}).
@@ -125,34 +122,19 @@ handle_call({request_notification, Service, Fun, Nodes}, _From, State=#state{kno
 handle_cast({add_node, Node}, State=#state{known_nodes=KnownNodes}) ->
 	{noreply, State#state{known_nodes=join([Node], KnownNodes)}};
 
-handle_cast({add_node, Service, Ref, Node}, State=#state{known_nodes=KnownNodes, requests=Requests}) ->
-	NKnownNodes = join([Node], KnownNodes),
+handle_cast({change_nodes, Service, Ref, Nodes}, State=#state{known_nodes=KnownNodes, requests=Requests}) ->
+	NKnownNodes = join(Nodes, KnownNodes),
 	NRequests = case dict:find(Service, Requests) of
 		error -> Requests;
 		{ok, Request} ->
 			Notifications = case dict:find(Ref, Request#request.notifications) of
 				error -> Request#request.notifications;
 				{ok, Notification} ->
-					Nodes = join([Node], Notification#notification.requested_nodes),
 					dict:store(Ref, Notification#notification{requested_nodes=Nodes}, Request#request.notifications)
 			end,
 			dict:store(Service, Request#request{notifications=Notifications}, Requests)
 	end,	
 	{noreply, State#state{known_nodes=NKnownNodes, requests=NRequests}};
-
-handle_cast({delete_node, Service, Ref, Node}, State=#state{requests=Requests}) ->
-	NRequests = case dict:find(Service, Requests) of
-		error -> Requests;
-		{ok, Request} ->
-			Notifications = case dict:find(Ref, Request#request.notifications) of
-				error -> Request#request.notifications;
-				{ok, Notification} ->
-					Nodes = lists:delete(Node, Notification#notification.requested_nodes),
-					dict:store(Ref, Notification#notification{requested_nodes=Nodes}, Request#request.notifications)
-			end,
-			dict:store(Service, Request#request{notifications=Notifications}, Requests)
-	end,	
-	{noreply, State#state{requests=NRequests}};
 
 handle_cast({delete_node, Node}, State=#state{known_nodes=KnownNodes}) ->
 	NKnownNodes = lists:delete(Node, KnownNodes),
