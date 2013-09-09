@@ -33,7 +33,7 @@
 %% API functions
 %% ====================================================================
 -export([start_link/0, refresh/0]).
--export([add_node/1, delete_node/1, change_nodes/3, known_nodes/0]).
+-export([add_node/1, delete_node/1, change_nodes/3, known_nodes/0, online_nodes/0]).
 -export([whereis_service/1, whereis_service/2]).
 -export([request_notification/2, request_notification/3, delete_notification/2]).
 
@@ -54,6 +54,9 @@ change_nodes(Service, Ref, Nodes) when is_atom(Service) andalso is_reference(Ref
 
 known_nodes() ->
 	gen_server:call(?MODULE, {get_known_nodes}).
+
+online_nodes() ->
+	gen_server:call(?MODULE, {get_online_nodes}).
 
 whereis_service(Service) when is_atom(Service) ->
 	whereis_service(Service, true).
@@ -84,7 +87,8 @@ init([]) ->
 	TimerInterval = application:get_env(?APP_NAME, ?CONFIG_REFRESH, ?DEFAULT_REFRESH),
 	{ok, Timer} = timer:send_interval(TimerInterval, {run_update}),
 	error_logger:info_msg("Just one more thing, ~p [~p] is starting...\n", [?MODULE, self()]),
-	{ok, run_update(#state{known_nodes=KnownNodes, nodes=dict:new(), services=dict:new(), requests=dict:new(), timer=Timer})}.
+	State = run_update(#state{known_nodes=KnownNodes, nodes=dict:new(), services=dict:new(), requests=dict:new(), timer=Timer}),
+	{ok, State}.
 
 %% handle_call
 handle_call({whereis_service, Service, IncludeLocal}, From, State=#state{services=Services}) ->
@@ -93,6 +97,10 @@ handle_call({whereis_service, Service, IncludeLocal}, From, State=#state{service
 
 handle_call({get_known_nodes}, _From, State=#state{known_nodes=KnownNodes}) ->
 	{reply, KnownNodes, State};
+
+handle_call({get_online_nodes}, From, State=#state{nodes=Nodes}) ->
+	run_get_online_nodes(From, Nodes),
+	{noreply, State};
 
 handle_call({refresh}, _From, State) ->
 	NState = run_update(State),
@@ -155,6 +163,10 @@ handle_cast({delete_notification, Service, Ref}, State=#state{requests=Requests}
 %% handle_info
 handle_info({run_update}, State) ->
 	NState = run_update(State),
+	{noreply, NState};
+
+handle_info({nodedown, _Node}, State) ->
+	NState = run_update(State),
 	{noreply, NState}.
 
 %% terminate
@@ -169,6 +181,13 @@ code_change(_OldVsn, State, _Extra) ->
 %% ====================================================================
 %% Internal functions
 %% ====================================================================
+
+run_get_online_nodes(From, Nodes) ->
+	Fun = fun() ->
+			Reply = dict:fetch_keys(Nodes),
+			gen_server:reply(From, Reply)
+	end,
+	spawn(Fun).
 
 run_whereis_service(Service, IncludeLocal, Services, From) ->
 	Fun = fun() ->
@@ -200,6 +219,7 @@ get_master_nodes() ->
 run_update(State) ->
 	KnownNodes = join(nodes(), State#state.known_nodes),
 	OnlineNodes = get_active_nodes(KnownNodes, []),
+	monitor_nodes(OnlineNodes, State#state.nodes),
 	Nodes = get_registered_services(OnlineNodes, dict:new()),
 	Services = get_services_nodes(OnlineNodes, Nodes, dict:new()),
 	OldServices = State#state.services,
@@ -219,6 +239,14 @@ get_active_nodes([Node|T], List) ->
 		pong -> get_active_nodes(T, [Node|List]);
 		pang -> get_active_nodes(T, List)
 	end.
+
+monitor_nodes([], _Dict) -> ok;
+monitor_nodes([Node|T], Dict) ->
+	case dict:is_key(Node, Dict) of
+		false -> monitor_node(Node, true);
+		true -> ok
+	end,
+	monitor_nodes(T, Dict).
 
 get_registered_services([], Nodes) -> Nodes;
 get_registered_services([Node|T], Nodes) -> 
