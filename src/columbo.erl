@@ -250,9 +250,12 @@ monitor_nodes([Node|T], Dict) ->
 
 get_registered_services([], Nodes) -> Nodes;
 get_registered_services([Node|T], Nodes) -> 
-	Registered = rpc:call(Node, erlang, registered, []),
-	NNodes = dict:store(Node, Registered, Nodes),
-	get_registered_services(T, NNodes).
+	case rpc:call(Node, erlang, registered, []) of
+		{badrpc, _Reason} -> get_registered_services(T, Nodes);
+		Registered -> 
+			NNodes = dict:store(Node, Registered, Nodes),
+			get_registered_services(T, NNodes)
+	end.
 
 get_services_nodes([], _Nodes, Services) -> Services;
 get_services_nodes([Node|T], Nodes, Services) ->
