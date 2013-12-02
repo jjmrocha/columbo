@@ -87,7 +87,11 @@ init([]) ->
 	TimerInterval = application:get_env(?APP_NAME, ?CONFIG_REFRESH, ?DEFAULT_REFRESH),
 	{ok, Timer} = timer:send_interval(TimerInterval, {run_update}),
 	error_logger:info_msg("Just one more thing, ~p [~p] is starting...\n", [?MODULE, self()]),
-	State = run_update(#state{known_nodes=KnownNodes, nodes=dict:new(), services=dict:new(), requests=dict:new(), timer=Timer}),
+	State = run_update(#state{known_nodes=KnownNodes, 
+							  nodes=dict:new(), 
+							  services=dict:new(), 
+							  requests=dict:new(), 
+							  timer=Timer}),
 	{ok, State}.
 
 %% handle_call
@@ -226,56 +230,55 @@ run_update(State) ->
 	spawn(fun() -> process_notifications(OldServices, Services, State#state.requests) end),
 	State#state{known_nodes=KnownNodes, nodes=Nodes, services=Services}.
 
-join([], List) -> List;
 join([Value|T], List) ->
 	case lists:member(Value, List) of
 		true -> join(T, List);
 		false -> join(T, [Value|List])
-	end.
+	end;
+join([], List) -> List.
 
-get_active_nodes([], Nodes) -> Nodes;
 get_active_nodes([Node|T], List) ->
 	case net_adm:ping(Node) of
 		pong -> get_active_nodes(T, [Node|List]);
 		pang -> get_active_nodes(T, List)
-	end.
+	end;
+get_active_nodes([], Nodes) -> Nodes.
 
-monitor_nodes([], _Dict) -> ok;
 monitor_nodes([Node|T], Dict) ->
 	case dict:is_key(Node, Dict) of
 		false -> monitor_node(Node, true);
 		true -> ok
 	end,
-	monitor_nodes(T, Dict).
+	monitor_nodes(T, Dict);
+monitor_nodes([], _Dict) -> ok.
 
-get_registered_services([], Nodes) -> Nodes;
 get_registered_services([Node|T], Nodes) -> 
 	case rpc:call(Node, erlang, registered, []) of
 		{badrpc, _Reason} -> get_registered_services(T, Nodes);
 		Registered -> 
 			NNodes = dict:store(Node, Registered, Nodes),
 			get_registered_services(T, NNodes)
-	end.
+	end;
+get_registered_services([], Nodes) -> Nodes.
 
-get_services_nodes([], _Nodes, Services) -> Services;
 get_services_nodes([Node|T], Nodes, Services) ->
 	{ok, Registered} = dict:find(Node, Nodes),
 	NServices = add_services(Registered, Node, Services),
-	get_services_nodes(T, Nodes, NServices).
+	get_services_nodes(T, Nodes, NServices);
+get_services_nodes([], _Nodes, Services) -> Services.
 
-add_services([], _Node, Services) -> Services;
 add_services([Service|T], Node, Services) ->
 	NServices = case dict:find(Service, Services) of
 		error -> dict:store(Service, [Node], Services);
 		{ok, NodeList} -> dict:store(Service, [Node|NodeList], Services)
 	end,
-	add_services(T, Node, NServices).
+	add_services(T, Node, NServices);
+add_services([], _Node, Services) -> Services.
 
 process_notifications(OldServices, NewServices, Requests) ->
 	Services = dict:fetch_keys(Requests),
 	notifications_for_service(Services, OldServices, NewServices, Requests).
 
-notifications_for_service([], _OldServices, _NewServices, _Requests) -> ok;
 notifications_for_service([Service|T], OldServices, NewServices, Requests) -> 
 	{ok, Request} = dict:find(Service, Requests),
 	NotificationList = dict:to_list(Request#request.notifications),
@@ -297,7 +300,8 @@ notifications_for_service([Service|T], OldServices, NewServices, Requests) ->
 					send_notification(Service, NotificationList, NewList, [], new)
 			end
 	end,
-	notifications_for_service(T, OldServices, NewServices, Requests).
+	notifications_for_service(T, OldServices, NewServices, Requests);
+notifications_for_service([], _OldServices, _NewServices, _Requests) -> ok.
 
 send_notification(_Service, [], _Nodes, _NodesDone, _Type) -> ok;
 send_notification(Service, [_Notification|TN], [], NodesDone, Type) -> 
@@ -328,12 +332,12 @@ run(Fun, Arg) ->
 	end,
 	spawn(F).
 
-not_in([], NotInList, _RefList) -> NotInList;
 not_in([Value|T], NotInList, RefList) ->
 	case lists:member(Value, RefList) of
 		true -> not_in(T, NotInList, RefList);
 		false -> not_in(T, [Value|NotInList], RefList)
-	end.
+	end;
+not_in([], NotInList, _RefList) -> NotInList.
 
 common(_List, _CommonList, []) -> [];
 common([], CommonList, _RefList) -> CommonList;
