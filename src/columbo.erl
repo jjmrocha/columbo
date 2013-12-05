@@ -21,6 +21,7 @@
 -define(SERVER, {local, ?MODULE}).
 
 -define(DEFAULT_REFRESH, 30000).
+-define(DEFAULT_GOSSIP, 60000).
 -define(ALL_NOTIFICATION_NODES, []).
 -define(COLUMBO_TABLE, ?MODULE).
 
@@ -94,19 +95,22 @@ send_to_nodes(Service, Nodes, Msg) when is_atom(Service) andalso is_list(Nodes) 
 %% ====================================================================
 %% Behavioural functions 
 %% ====================================================================
--record(state, {known_nodes, online_nodes, timer}).
+-record(state, {known_nodes, online_nodes, refresh_timer, gossip_timer}).
 
 %% init
 init([]) ->
 	process_flag(trap_exit, true),	
 	create_table(),
 	KnownNodes = get_master_nodes(),
-	TimerInterval = application:get_env(columbo, refresh_interval, ?DEFAULT_REFRESH),
-	{ok, Timer} = timer:send_interval(TimerInterval, {run_update}),
+	RefreshInterval = application:get_env(columbo, refresh_interval, ?DEFAULT_REFRESH),
+	GossipInterval = application:get_env(columbo, gossip_interval, ?DEFAULT_GOSSIP),
+	{ok, RefreshTimer} = timer:send_interval(RefreshInterval, {run_update}),
+	{ok, GossipTimer} = timer:send_interval(GossipInterval, {run_gossip}),
 	error_logger:info_msg("Just one more thing, ~p [~p] is starting...\n", [?MODULE, self()]),
 	State = run_update(#state{known_nodes=KnownNodes, 
 				online_nodes=[], 
-				timer=Timer}),
+				refresh_timer=RefreshTimer,
+				gossip_timer=GossipTimer}),
 	{ok, State}.
 
 %% handle_call
@@ -130,17 +134,26 @@ handle_cast({delete_node, Node}, State=#state{known_nodes=KnownNodes}) ->
 	{noreply, State#state{known_nodes=NKnownNodes}}.
 
 %% handle_info
+handle_info({gossip, Nodes}, State=#state{known_nodes=KnownNodes}) ->
+	NKnownNodes = add_if_not_member(Nodes, KnownNodes),
+	{noreply, State#state{known_nodes=NKnownNodes}};
+
 handle_info({run_update}, State) ->
 	NState = run_update(State),
 	{noreply, NState};
+
+handle_info({run_gossip}, State=#state{known_nodes=KnownNodes}) ->
+	send_to_all(?MODULE, {gossip, KnownNodes}),
+	{noreply, State};
 
 handle_info({nodedown, _Node}, State) ->
 	NState = run_update(State),
 	{noreply, NState}.
 
 %% terminate
-terminate(_Reason, #state{timer=Timer}) ->
-	timer:cancel(Timer),
+terminate(_Reason, #state{refresh_timer=RefreshTimer, gossip_timer=GossipTimer}) ->
+	timer:cancel(RefreshTimer),
+	timer:cancel(GossipTimer),
 	drop_table(),
 	ok.
 
