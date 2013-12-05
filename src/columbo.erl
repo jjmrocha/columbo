@@ -30,37 +30,48 @@
 %% API functions
 %% ====================================================================
 -export([start_link/0, refresh/0]).
--export([add_node/1, delete_node/1, known_nodes/0, online_nodes/0]).
+-export([add_node/1, add_nodes/1, delete_node/1, known_nodes/0, online_nodes/0]).
 -export([whereis_service/1, whereis_service/2]).
--export([send_to_all/2]).
+-export([send_to_all/2, send_to_nodes/3]).
 
 start_link() ->
 	gen_server:start_link(?SERVER, ?MODULE, [], []).
 
+-spec refresh() -> ok.
 refresh() ->
 	gen_server:call(?MODULE, {refresh}).
 
-add_node(Node) when is_atom(Node) ->
-	gen_server:cast(?MODULE, {add_node, Node}).
+-spec add_node(Node :: atom()) -> ok.
+add_node(Node) ->
+	add_nodes([Node]).
 
+-spec add_nodes(Nodes :: [atom(), ...]) -> ok.
+add_nodes(Nodes) ->
+	gen_server:cast(?MODULE, {add_nodes, Nodes}).
+
+-spec delete_node(Node :: atom()) -> ok.
 delete_node(Node) when is_atom(Node) ->
 	gen_server:cast(?MODULE, {delete_node, Node}).
 
+-spec known_nodes() -> [atom(), ...].
 known_nodes() ->
 	gen_server:call(?MODULE, {get_known_nodes}).
 
+-spec online_nodes() -> [atom(), ...].
 online_nodes() ->
 	gen_server:call(?MODULE, {get_online_nodes}).
 
-whereis_service(Service) when is_atom(Service) ->
+-spec whereis_service(Service :: atom()) -> [atom(), ...].
+whereis_service(Service) ->
 	whereis_service(Service, true).
 
-whereis_service(Service, false) when is_atom(Service) ->
+-spec whereis_service(Service :: atom(), IncludeLocal :: boolean()) -> [atom(), ...].
+whereis_service(Service, false) ->
 	case ets:lookup(?COLUMBO_TABLE, Service) of
 		[] -> [];
 		[{_, Nodes}] -> Nodes
 	end;
-whereis_service(Service, true) when is_atom(Service) ->
+whereis_service(Service, true) ->
 	LocalServices = erlang:registered(),
 	Local = case lists:member(Service, LocalServices) of
 		true -> [node()];
@@ -69,9 +80,16 @@ whereis_service(Service, true) when is_atom(Service) ->
 	Remote = whereis_service(Service, false),
 	Local ++ Remote.
 
+-spec send_to_all(Service :: atom(), Msg :: any()) -> ok.
 send_to_all(Service, Msg) ->
 	Nodes = whereis_service(Service, false),
-	lists:foreach(fun(Node) -> {Service, Node} ! Msg end, Nodes).
+	send_msg(Service, Nodes, Msg).
+
+-spec send_to_nodes(Service :: atom(), Nodes :: [atom(), ...], Msg :: any()) -> ok.
+send_to_nodes(Service, Nodes, Msg) when is_atom(Service) andalso is_list(Nodes) ->
+	OnlineNodes = whereis_service(Service, false),
+	SelectedNodes = common(Nodes, OnlineNodes),
+	send_msg(Service, SelectedNodes, Msg).
 
 %% ====================================================================
 %% Behavioural functions 
@@ -103,8 +121,8 @@ handle_call({refresh}, _From, State) ->
 	{reply, ok, NState}.
 
 %% handle_cast
-handle_cast({add_node, Node}, State=#state{known_nodes=KnownNodes}) ->
-	NKnownNodes = add_if_not_member([Node], KnownNodes),
+handle_cast({add_nodes, Nodes}, State=#state{known_nodes=KnownNodes}) ->
+	NKnownNodes = add_if_not_member(Nodes, KnownNodes),
 	{noreply, State#state{known_nodes=NKnownNodes}};
 
 handle_cast({delete_node, Node}, State=#state{known_nodes=KnownNodes}) ->
@@ -210,3 +228,13 @@ get_all_services(ServiceData) ->
 
 drop_table() ->
 	ets:delete(?COLUMBO_TABLE).
+
+common(_List1, []) -> [];
+common([], _List2) -> [];
+common(List1, List2) -> 
+	lists:filter(fun(Elem) -> 
+		lists:member(Elem, List2) 
+	end, List1).
+
+send_msg(Service, Nodes, Msg) ->
+	lists:foreach(fun(Node) -> {Service, Node} ! Msg end, Nodes).
