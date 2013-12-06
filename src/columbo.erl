@@ -87,6 +87,7 @@ send_to_all(Service, Msg) ->
 	send_msg(Service, Nodes, Msg).
 
 -spec send_to_nodes(Service :: atom(), Nodes :: [atom(), ...], Msg :: any()) -> integer().
+send_to_nodes(_Service, [], _Msg) -> 0;
 send_to_nodes(Service, Nodes, Msg) ->
 	OnlineNodes = whereis_service(Service, false),
 	SelectedNodes = common(Nodes, OnlineNodes),
