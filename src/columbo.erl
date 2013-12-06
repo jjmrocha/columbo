@@ -81,13 +81,13 @@ whereis_service(Service, true) ->
 	Remote = whereis_service(Service, false),
 	Local ++ Remote.
 
--spec send_to_all(Service :: atom(), Msg :: any()) -> ok.
+-spec send_to_all(Service :: atom(), Msg :: any()) -> integer().
 send_to_all(Service, Msg) ->
 	Nodes = whereis_service(Service, false),
 	send_msg(Service, Nodes, Msg).
 
--spec send_to_nodes(Service :: atom(), Nodes :: [atom(), ...], Msg :: any()) -> ok.
-send_to_nodes(Service, Nodes, Msg) when is_atom(Service) andalso is_list(Nodes) ->
+-spec send_to_nodes(Service :: atom(), Nodes :: [atom(), ...], Msg :: any()) -> integer().
+send_to_nodes(Service, Nodes, Msg) ->
 	OnlineNodes = whereis_service(Service, false),
 	SelectedNodes = common(Nodes, OnlineNodes),
 	send_msg(Service, SelectedNodes, Msg).
@@ -249,5 +249,9 @@ common(List1, List2) ->
 		lists:member(Elem, List2) 
 	end, List1).
 
+send_msg(_Service, [], _Msg) -> 0;
 send_msg(Service, Nodes, Msg) ->
-	lists:foreach(fun(Node) -> {Service, Node} ! Msg end, Nodes).
+	lists:foldl(fun(Node, Acc) -> 
+		{Service, Node} ! Msg, 
+		Acc + 1 
+	end, 0, Nodes).
