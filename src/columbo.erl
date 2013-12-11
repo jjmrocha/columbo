@@ -127,7 +127,8 @@ handle_call({refresh}, _From, State) ->
 
 %% handle_cast
 handle_cast({add_nodes, Nodes}, State=#state{known_nodes=KnownNodes}) ->
-	NKnownNodes = add_if_not_member(Nodes, KnownNodes),
+	RemoteNodes = lists:delete(node(), Nodes),
+	NKnownNodes = add_if_not_member(RemoteNodes, KnownNodes),
 	{noreply, State#state{known_nodes=NKnownNodes}};
 
 handle_cast({delete_node, Node}, State=#state{known_nodes=KnownNodes}) ->
@@ -136,7 +137,8 @@ handle_cast({delete_node, Node}, State=#state{known_nodes=KnownNodes}) ->
 
 %% handle_info
 handle_info({gossip, Nodes}, State=#state{known_nodes=KnownNodes}) ->
-	NKnownNodes = add_if_not_member(Nodes, KnownNodes),
+	GossipNodes = lists:delete(node(), Nodes),
+	NKnownNodes = add_if_not_member(GossipNodes, KnownNodes),
 	{noreply, State#state{known_nodes=NKnownNodes}};
 
 handle_info({run_update}, State) ->
