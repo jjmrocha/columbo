@@ -232,10 +232,10 @@ add_node_to_services([Service|T], Node, Dict) ->
 add_node_to_services([], _Node, Dict) -> Dict.
 
 get_all_services(ServiceData) ->
-	Fun = fun({Service, _}) ->
-			case dict:find(Service, ServiceData) of
-				error -> dict:store(Service, [], ServiceData);
-				_ -> ServiceData
+	Fun = fun({Service, _}, Dict) ->
+			case dict:find(Service, Dict) of
+				error -> dict:store(Service, [], Dict);
+				_ -> Dict
 			end
 	end,
 	ets:foldl(Fun, ServiceData, ?COLUMBO_TABLE).
