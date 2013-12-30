@@ -16,7 +16,7 @@
 
 {application, columbo, [
 	{description, "Erlang service discovery and tracking system for clusters"},
-	{vsn, "0.7.0"},
+	{vsn, "0.8.0"},
 	{modules, [	
 		columbo_app,
 		columbo_sup,
