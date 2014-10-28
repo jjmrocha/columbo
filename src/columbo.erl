@@ -20,10 +20,15 @@
 
 -define(SERVER, {local, ?MODULE}).
 
+-define(NO_UDP, none).
+
 -define(DEFAULT_REFRESH, 30000).
 -define(DEFAULT_GOSSIP, 60000).
+-define(DEFAULT_UDP, ?NO_UDP).
+
 -define(ALL_NOTIFICATION_NODES, []).
 -define(COLUMBO_TABLE, ?MODULE).
+-define(COLUMBO_UDP_MSG, <<"columbo:">>).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
@@ -96,7 +101,7 @@ send_to_nodes(Service, Nodes, Msg) ->
 %% ====================================================================
 %% Behavioural functions 
 %% ====================================================================
--record(state, {known_nodes, online_nodes, refresh_timer, gossip_timer}).
+-record(state, {known_nodes, online_nodes, refresh_timer, gossip_timer, udp}).
 
 %% init
 init([]) ->
@@ -105,13 +110,16 @@ init([]) ->
 	KnownNodes = get_master_nodes(),
 	RefreshInterval = application:get_env(columbo, refresh_interval, ?DEFAULT_REFRESH),
 	GossipInterval = application:get_env(columbo, gossip_interval, ?DEFAULT_GOSSIP),
+	UDPPort = application:get_env(columbo, udp_port, ?DEFAULT_UDP),
 	{ok, RefreshTimer} = timer:send_interval(RefreshInterval, {run_update}),
 	{ok, GossipTimer} = timer:send_interval(GossipInterval, {run_gossip}),
+	{ok, UDPSocket} = open_socket(UDPPort),
 	error_logger:info_msg("Just one more thing, ~p [~p] is starting...\n", [?MODULE, self()]),
 	State = run_update(#state{known_nodes=KnownNodes, 
 				online_nodes=[], 
 				refresh_timer=RefreshTimer,
-				gossip_timer=GossipTimer}),
+				gossip_timer=GossipTimer,
+				udp=UDPSocket}),
 	{ok, State}.
 
 %% handle_call
@@ -149,14 +157,27 @@ handle_info({run_gossip}, State=#state{known_nodes=KnownNodes}) ->
 	send_to_all(?MODULE, {gossip, KnownNodes}),
 	{noreply, State};
 
+handle_info({udp, _Socket, _Host, _Port, Bin}, State) ->
+	case binary:split(Bin, ?COLUMBO_UDP_MSG) of
+		[<<>>, NodeBin] ->
+			Node = binary_to_atom(NodeBin, utf8),
+			case net_adm:ping(Node) of
+				pong -> add_node(Node);
+				_ -> ok
+			end;
+		_ -> ok
+	end,
+	{noreply, State};
+
 handle_info({nodedown, _Node}, State) ->
 	NState = run_update(State),
 	{noreply, NState}.
 
 %% terminate
-terminate(_Reason, #state{refresh_timer=RefreshTimer, gossip_timer=GossipTimer}) ->
+terminate(_Reason, #state{refresh_timer=RefreshTimer, gossip_timer=GossipTimer, udp=UDPSocket}) ->
 	timer:cancel(RefreshTimer),
 	timer:cancel(GossipTimer),
+	close_socket(UDPSocket),
 	drop_table(),
 	ok.
 
@@ -249,12 +270,43 @@ common(_List1, []) -> [];
 common([], _List2) -> [];
 common(List1, List2) -> 
 	lists:filter(fun(Elem) -> 
-		lists:member(Elem, List2) 
-	end, List1).
+				lists:member(Elem, List2) 
+		end, List1).
 
 send_msg(_Service, [], _Msg) -> 0;
 send_msg(Service, Nodes, Msg) ->
 	lists:foldl(fun(Node, Acc) -> 
-		{Service, Node} ! Msg, 
-		Acc + 1 
-	end, 0, Nodes).
+				{Service, Node} ! Msg, 
+				Acc + 1 
+		end, 0, Nodes).
+
+open_socket(?NO_UDP) -> {ok, ?NO_UDP};
+open_socket(UDPPort) ->
+	{ok, Socket} = gen_udp:open(UDPPort, [binary, {active, true}, {broadcast, true}]),
+	send_introduction(Socket, UDPPort),
+	{ok, Socket}.
+
+send_introduction(Socket, UDPPort) ->
+	Node = atom_to_binary(node(), utf8),
+	Msg = <<?COLUMBO_UDP_MSG/binary, Node/binary>>,
+	Gateways = get_gateways(),
+	lists:foreach(fun(IP) ->
+				gen_udp:send(Socket, IP, UDPPort, Msg)
+		end, Gateways),
+	ok.
+
+get_gateways() ->
+	case inet:getifaddrs() of
+		{ok, NetConfig} ->
+			lists:foldl(fun({_, Config}, Acc) ->
+						case lists:keyfind(broadaddr, 1, Config) of
+							false -> Acc;
+							{_, IP} -> [IP|Acc]
+						end
+				end, [], NetConfig);
+		_ -> []
+	end.
+
+close_socket(?NO_UDP) -> ok;
+close_socket(UDPSocket) -> 
+	gen_udp:close(UDPSocket).
