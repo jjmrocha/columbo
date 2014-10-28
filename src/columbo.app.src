@@ -29,5 +29,8 @@
 		kernel, 
 		stdlib
 	]},
-	{mod, {columbo_app, []}}
+	{mod, {columbo_app, []}},
+	{env, [
+%%		{udp_port, 8080}
+	]}
 ]}.
