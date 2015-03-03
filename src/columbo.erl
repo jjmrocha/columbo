@@ -20,11 +20,14 @@
 
 -define(SERVER, {local, ?MODULE}).
 
--define(NO_UDP, none).
+-define(NO_UDP_PORT, none).
+-define(ALL_INTERFACES, "*").
+-define(BROADCAST_IP, "255.255.255.255").
 
 -define(DEFAULT_REFRESH, 30000).
 -define(DEFAULT_GOSSIP, 60000).
--define(DEFAULT_UDP, ?NO_UDP).
+-define(DEFAULT_UDP, ?NO_UDP_PORT).
+-define(DEFAULT_INTERFACE, ?ALL_INTERFACES).
 
 -define(ALL_NOTIFICATION_NODES, []).
 -define(COLUMBO_TABLE, ?MODULE).
@@ -110,10 +113,9 @@ init([]) ->
 	KnownNodes = get_master_nodes(),
 	RefreshInterval = application:get_env(columbo, refresh_interval, ?DEFAULT_REFRESH),
 	GossipInterval = application:get_env(columbo, gossip_interval, ?DEFAULT_GOSSIP),
-	UDPPort = application:get_env(columbo, udp_port, ?DEFAULT_UDP),
 	{ok, RefreshTimer} = timer:send_interval(RefreshInterval, {run_update}),
 	{ok, GossipTimer} = timer:send_interval(GossipInterval, {run_gossip}),
-	{ok, UDPSocket} = open_socket(UDPPort),
+	{ok, UDPSocket} = open_socket(),
 	error_logger:info_msg("Just one more thing, ~p [~p] is starting...\n", [?MODULE, self()]),
 	State = run_update(#state{known_nodes=KnownNodes, 
 				online_nodes=[], 
@@ -280,33 +282,49 @@ send_msg(Service, Nodes, Msg) ->
 				Acc + 1 
 		end, 0, Nodes).
 
-open_socket(?NO_UDP) -> {ok, ?NO_UDP};
+open_socket() ->
+	UDPPort = application:get_env(columbo, udp_port, ?DEFAULT_UDP),
+	open_socket(UDPPort).
+
+open_socket(?NO_UDP_PORT) -> {ok, ?NO_UDP_PORT};
 open_socket(UDPPort) ->
-	{ok, Socket} = gen_udp:open(UDPPort, [binary, {active, true}, {broadcast, true}]),
-	send_introduction(Socket, UDPPort),
+	{ok, Socket} = gen_udp:open(UDPPort, [binary, {active, true}, {broadcast, true}, {reuseaddr, true}]),
+	ok = send_introduction(Socket, UDPPort),
 	{ok, Socket}.
 
 send_introduction(Socket, UDPPort) ->
 	Node = atom_to_binary(node(), utf8),
 	Msg = <<?COLUMBO_UDP_MSG/binary, Node/binary>>,
-	Gateways = get_gateways(),
-	lists:foreach(fun(IP) ->
-				gen_udp:send(Socket, IP, UDPPort, Msg)
-		end, Gateways),
-	ok.
+	BroadcastIP = broadcast_addr(),
+	gen_udp:send(Socket, BroadcastIP, UDPPort, Msg).
 
-get_gateways() ->
-	case inet:getifaddrs() of
-		{ok, NetConfig} ->
-			lists:foldl(fun({_, Config}, Acc) ->
-						case lists:keyfind(broadaddr, 1, Config) of
-							false -> Acc;
-							{_, IP} -> [IP|Acc]
-						end
-				end, [], NetConfig);
-		_ -> []
+broadcast_addr() ->
+	case application:get_env(columbo, interface, ?DEFAULT_INTERFACE) of
+		?ALL_INTERFACES -> ?BROADCAST_IP;
+		Interface ->
+			case inet:getifaddrs() of
+				{ok, NetConfig} ->
+					case lists:keyfind(Interface, 1, NetConfig) of
+						false -> ?BROADCAST_IP;
+						{_, Props} ->
+							Flags = proplists:get_value(flags, Props, []),
+							Up = lists:member(up, Flags),
+							Broadcast = lists:member(broadcast, Flags),
+							LoopBack =  lists:member(loopback, Flags),
+							P2P = lists:member(pointtopoint, Flags),
+							if 
+								Up =:= true, Broadcast =:= true, LoopBack /= true andalso P2P /= true ->
+									case lists:keyfind(broadcast, 1, Props) of
+										false -> ?BROADCAST_IP;
+										{_, IP} -> IP
+									end;
+								true -> ?BROADCAST_IP
+							end
+					end;
+				_ -> ?BROADCAST_IP
+			end
 	end.
 
-close_socket(?NO_UDP) -> ok;
+close_socket(?NO_UDP_PORT) -> ok;
 close_socket(UDPSocket) -> 
 	gen_udp:close(UDPSocket).
