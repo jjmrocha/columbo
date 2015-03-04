@@ -22,7 +22,7 @@
 
 -define(NO_UDP_PORT, none).
 -define(ALL_INTERFACES, "*").
--define(BROADCAST_IP, "255.255.255.255").
+-define(BROADCAST_IP, {255, 255, 255, 255}).
 
 -define(DEFAULT_REFRESH, 30000).
 -define(DEFAULT_GOSSIP, 60000).
@@ -288,9 +288,22 @@ open_socket() ->
 
 open_socket(?NO_UDP_PORT) -> {ok, ?NO_UDP_PORT};
 open_socket(UDPPort) ->
-	{ok, Socket} = gen_udp:open(UDPPort, [binary, {active, true}, {broadcast, true}, {reuseaddr, true}]),
+	SocketOptions = get_socket_options(),
+	{ok, Socket} = gen_udp:open(UDPPort, SocketOptions),
 	ok = send_introduction(Socket, UDPPort),
 	{ok, Socket}.
+
+get_socket_options() ->
+	Global = [binary, inet, {active, true}, {broadcast, true}, {reuseaddr, true}],
+	Specific = case os:type() of
+        {unix, OsName} ->
+            case lists:member(OsName, [darwin, freebsd, openbsd, netbsd]) of
+                true -> [{raw, 16#ffff, 16#0200, <<1:32/native>>}];
+                false -> []
+            end;
+        _ -> []
+    end,
+	Global ++ Specific.
 
 send_introduction(Socket, UDPPort) ->
 	Node = atom_to_binary(node(), utf8),
@@ -314,7 +327,7 @@ broadcast_addr() ->
 							P2P = lists:member(pointtopoint, Flags),
 							if 
 								Up =:= true, Broadcast =:= true, LoopBack /= true andalso P2P /= true ->
-									case lists:keyfind(broadcast, 1, Props) of
+									case lists:keyfind(broadaddr, 1, Props) of
 										false -> ?BROADCAST_IP;
 										{_, IP} -> IP
 									end;
