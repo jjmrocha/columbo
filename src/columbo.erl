@@ -136,20 +136,18 @@ handle_call({refresh}, _From, State) ->
 	{reply, ok, NState}.
 
 %% handle_cast
-handle_cast({add_nodes, Nodes}, State=#state{known_nodes=KnownNodes}) ->
-	RemoteNodes = lists:delete(node(), Nodes),
-	NKnownNodes = add_if_not_member(RemoteNodes, KnownNodes),
-	{noreply, State#state{known_nodes=NKnownNodes}};
+handle_cast({add_nodes, Nodes}, State) ->
+	NState = update_nodes(State, Nodes),
+	{noreply, NState};
 
 handle_cast({delete_node, Node}, State=#state{known_nodes=KnownNodes}) ->
 	NKnownNodes = lists:delete(Node, KnownNodes),
 	{noreply, State#state{known_nodes=NKnownNodes}}.
 
 %% handle_info
-handle_info({gossip, Nodes}, State=#state{known_nodes=KnownNodes}) ->
-	GossipNodes = lists:delete(node(), Nodes),
-	NKnownNodes = add_if_not_member(GossipNodes, KnownNodes),
-	{noreply, State#state{known_nodes=NKnownNodes}};
+handle_info({gossip, Nodes}, State) ->
+	NState = update_nodes(State, Nodes),
+	{noreply, NState};
 
 handle_info({run_update}, State) ->
 	NState = run_update(State),
@@ -207,6 +205,14 @@ add_if_not_member([Value|T], List) ->
 		false -> add_if_not_member(T, [Value|List])
 	end;
 add_if_not_member([], List) -> List.
+
+update_nodes(State=#state{known_nodes=KnownNodes}, Nodes) ->
+	NewNodes = lists:delete(node(), Nodes),
+	NKnownNodes = add_if_not_member(NewNodes, KnownNodes),
+	if erlang:length(KnownNodes) /= erlang:length(NKnownNodes) ->
+			run_update(State#state{known_nodes=NKnownNodes});
+		true -> State
+	end.
 
 run_update(State) ->
 	KnownNodes = add_if_not_member(nodes(), State#state.known_nodes),
@@ -296,13 +302,13 @@ open_socket(UDPPort) ->
 get_socket_options() ->
 	Global = [binary, inet, {active, true}, {broadcast, true}, {reuseaddr, true}],
 	Specific = case os:type() of
-        {unix, OsName} ->
-            case lists:member(OsName, [darwin, freebsd, openbsd, netbsd]) of
-                true -> [{raw, 16#ffff, 16#0200, <<1:32/native>>}];
-                false -> []
-            end;
-        _ -> []
-    end,
+		{unix, OsName} ->
+			case lists:member(OsName, [darwin, freebsd, openbsd, netbsd]) of
+				true -> [{raw, 16#ffff, 16#0200, <<1:32/native>>}];
+				false -> []
+			end;
+		_ -> []
+	end,
 	Global ++ Specific.
 
 send_introduction(Socket, UDPPort) ->
