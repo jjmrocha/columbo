@@ -1,5 +1,5 @@
 %%
-%% Copyright 2014 Joaquim Rocha <jrocha@gmailbox.org>
+%% Copyright 2015 Joaquim Rocha <jrocha@gmailbox.org>
 %% 
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -14,18 +14,10 @@
 %% limitations under the License.
 %%
 
--module(columbo_sup).
+-define(COLUMBO_NOTIFY_NEW, new).
+-define(COLUMBO_NOTIFY_DOWN, down).
 
--behaviour(supervisor).
+-define(COLUMBO_NOTIFY(Operation, Service, Node), {columbo, {Operation, Service, Node}}).
 
--export([init/1]).
--export([start_link/0]).
-
-start_link() ->
-	supervisor:start_link(?MODULE, []).
-
-init([]) ->
-	COLUMBO_APP = {columbo,{columbo, start_link, []}, permanent, 2000, worker, [columbo]},
-	{ok, {{one_for_one, 5, 60}, [COLUMBO_APP]}}.
-
-
+-define(COLUMBO_NEW_NODE(Service, Node), ?COLUMBO_NOTIFY(?COLUMBO_NOTIFY_NEW, Service, Node)).
+-define(COLUMBO_DOWN_NODE(Service, Node), ?COLUMBO_NOTIFY(?COLUMBO_NOTIFY_DOWN, Service, Node)).
