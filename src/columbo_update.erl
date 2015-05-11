@@ -81,5 +81,5 @@ get_all_services(ServiceData) ->
 				_ -> Dict
 			end
 	end,
-	columbo_service:foldl(Fun, ServiceData).
+	columbo_service:fold(Fun, ServiceData).
 
