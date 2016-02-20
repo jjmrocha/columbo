@@ -85,5 +85,4 @@ down_node(Service, Node) -> send_event(?COLUMBO_DOWN_NODE, Service, Node).
 
 send_event(EventName, Service, Node) ->
 	Info = [{?COLUMBO_EVENT_PROP_NODE, Node}],
-	Event = eb_event:new(EventName, Service, Info),
-	event_broker:publish(Event).
+	event_broker:publish(EventName, Service, Info).
