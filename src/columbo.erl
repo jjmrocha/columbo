@@ -31,7 +31,6 @@
 -export([add_node/1, add_nodes/1, delete_node/1, known_nodes/0, online_nodes/0]).
 -export([whereis_service/1, whereis_service/2]).
 -export([send_to_all/2, send_to_nodes/3]).
--export([subscribe/1, unsubscribe/1]).
 
 start_link() ->
 	gen_server:start_link(?SERVER, ?MODULE, [], []).
@@ -88,14 +87,6 @@ send_to_nodes(Service, Nodes, Msg) ->
 	SelectedNodes = columbo_util:common(Nodes, OnlineNodes),
 	send_msg(Service, SelectedNodes, Msg).
 
--spec subscribe(Service :: atom()) -> true.
-subscribe(Service) ->
-	columbo_notify:subscribe(Service, self()).
-
--spec unsubscribe(Service :: atom()) -> true.
-unsubscribe(Service) ->
-	columbo_notify:unsubscribe(Service, self()).
-
 %% ====================================================================
 %% Behavioural functions 
 %% ====================================================================
@@ -105,13 +96,13 @@ unsubscribe(Service) ->
 init([]) ->
 	process_flag(trap_exit, true),	
 	create_tables(),
-	{ok, RefreshInterval} = application:get_env(columbo, refresh_interval),
-	{ok, GossipInterval} = application:get_env(columbo, gossip_interval),
+	{ok, RefreshInterval} = application:get_env(refresh_interval),
+	{ok, GossipInterval} = application:get_env(gossip_interval),
 	{ok, RefreshTimer} = timer:send_interval(RefreshInterval, {run_update}),
 	{ok, GossipTimer} = timer:send_interval(GossipInterval, {run_gossip}),
 	{ok, UDPSocket} = columbo_cast:open_socket(),
 	error_logger:info_msg("Just one more thing, ~p [~p] is starting...\n", [?MODULE, self()]),
-	MasterNodes = get_master_nodes(),
+	{ok, MasterNodes} = application:get_env(master_nodes),
 	{KnownNodes, OnlineNodes} = columbo_update:run(MasterNodes, []),
 	State = #state{known_nodes=KnownNodes, 
 			online_nodes=OnlineNodes, 
@@ -184,12 +175,6 @@ create_tables() ->
 drop_tables() ->
 	columbo_service:drop(),
 	columbo_notify:drop().
-
-get_master_nodes() ->
-	case application:get_env(columbo, master_nodes) of
-		undefined -> [];
-		{ok, Configured} -> lists:delete(node(), Configured)
-	end.
 
 update_nodes(State=#state{known_nodes=KnownNodes}, Nodes) ->
 	NewNodes = lists:delete(node(), Nodes),

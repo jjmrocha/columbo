@@ -1,5 +1,5 @@
 %%
-%% Copyright 2015 Joaquim Rocha <jrocha@gmailbox.org>
+%% Copyright 2016 Joaquim Rocha <jrocha@gmailbox.org>
 %% 
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -14,10 +14,7 @@
 %% limitations under the License.
 %%
 
--define(COLUMBO_NOTIFY_NEW, new).
--define(COLUMBO_NOTIFY_DOWN, down).
+-define(COLUMBO_NEW_NODE, <<"columbo:new_node">>).
+-define(COLUMBO_DOWN_NODE, <<"columbo:down_node">>).
 
--define(COLUMBO_NOTIFY(Operation, Service, Node), {columbo, {Operation, Service, Node}}).
-
--define(COLUMBO_NEW_NODE(Service, Node), ?COLUMBO_NOTIFY(?COLUMBO_NOTIFY_NEW, Service, Node)).
--define(COLUMBO_DOWN_NODE(Service, Node), ?COLUMBO_NOTIFY(?COLUMBO_NOTIFY_DOWN, Service, Node)).
+-define(COLUMBO_EVENT_PROP_NODE, node).

@@ -24,10 +24,12 @@
 	]},
 	{applications, [
 		kernel, 
-		stdlib
+		stdlib,
+		event_broker
 	]},
 	{mod, {columbo_app, []}},
 	{env, [
+		{master_nodes, []},
 		{refresh_interval, 10000},
 		{gossip_interval, 60000},
 		{udp_port, 38077},

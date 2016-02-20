@@ -1,5 +1,5 @@
 %%
-%% Copyright 2015 Joaquim Rocha <jrocha@gmailbox.org>
+%% Copyright 2015-16 Joaquim Rocha <jrocha@gmailbox.org>
 %% 
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -16,18 +16,16 @@
 
 -module(columbo_notify).
 
--include("columbo_notify.hrl").
+-include("columbo_events.hrl").
 
 -define(NOTIFY_TABLE, columbo_notify_ets).
 
--define(KEY(Service, Pid), {Service, Pid}).
--define(RECORD(Key, Nodes), {Key, Nodes}).
+-define(RECORD(Service, Nodes), {Service, Nodes}).
 
 %% ====================================================================
 %% API functions
 %% ====================================================================
 -export([create/0, drop/0]).
--export([subscribe/2, unsubscribe/2]).
 -export([notify/1]).
 
 create() ->
@@ -37,31 +35,20 @@ create() ->
 drop() ->
 	ets:delete(?NOTIFY_TABLE).
 
-subscribe(Service, Pid) ->
-	Key = ?KEY(Service, Pid),
-	Record = ?RECORD(Key, []),
-	ets:insert(?NOTIFY_TABLE, Record).
-
-unsubscribe(Service, Pid) ->
-	Key = ?KEY(Service, Pid),
-	ets:delete(?NOTIFY_TABLE, Key).
-
 notify(Services) ->
-	spawn(fun() -> 
-				run_notify(Services) 
-		end).
+	async:run(fun run_notify/1, [Services]).
 
 %% ====================================================================
 %% Internal functions
 %% ====================================================================
 
 run_notify(Services) ->
-	ets:foldl(fun(?RECORD(Key=?KEY(Service, Pid), Nodes), Acc) -> 
+	ets:foldl(fun(?RECORD(Service, Nodes), Acc) -> 
 				case dict:find(Service, Services) of
 					error ->
 						if length(Nodes) > 0 ->
-								ets:insert(?NOTIFY_TABLE, ?RECORD(Key, [])),
-								Count = notify(Pid, Service, fun down_msg/2, Nodes),
+								ets:insert(?NOTIFY_TABLE, ?RECORD(Service, [])),
+								Count = notify(Service, fun down_node/2, Nodes),
 								Acc + Count;
 							true -> Acc
 						end;
@@ -69,9 +56,9 @@ run_notify(Services) ->
 						Down = not_in(Nodes, ActiveNodes),
 						New = not_in(ActiveNodes, Nodes),
 						if length(Down) > 0 orelse length(New) > 0 ->
-								ets:insert(?NOTIFY_TABLE, ?RECORD(Key, ActiveNodes)),
-								CountNew = notify(Pid, Service, fun new_msg/2, New),
-								CountDown = notify(Pid, Service, fun down_msg/2, Down),
+								ets:insert(?NOTIFY_TABLE, ?RECORD(Service, ActiveNodes)),
+								CountNew = notify(Service, fun new_node/2, New),
+								CountDown = notify(Service, fun down_node/2, Down),
 								Acc + CountNew + CountDown;
 							true -> Acc
 						end
@@ -85,13 +72,18 @@ not_in(List1, List2) ->
 				not lists:member(E, List2) 
 		end, List1).
 
-notify(_Pid, _Service, _Fun, []) -> 0;
-notify(Pid, Service, Fun, Nodes) ->
+notify(_Service, _Fun, []) -> 0;
+notify(Service, Fun, Nodes) ->
 	lists:foldl(fun(Node, C) ->
-				Pid ! Fun(Service, Node),
+				Fun(Service, Node),
 				C + 1
 		end, 0, Nodes).
 
-new_msg(Service, Node) -> ?COLUMBO_NEW_NODE(Service, Node).
+new_node(Service, Node) -> send_event(?COLUMBO_NEW_NODE, Service, Node).
 
-down_msg(Service, Node) -> ?COLUMBO_DOWN_NODE(Service, Node).
+down_node(Service, Node) -> send_event(?COLUMBO_DOWN_NODE, Service, Node).
+
+send_event(EventName, Service, Node) ->
+	Info = [{?COLUMBO_EVENT_PROP_NODE, Node}],
+	Event = eb_event:new(EventName, Service, Info),
+	event_broker:publish(Event).
