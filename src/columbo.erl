@@ -1,5 +1,5 @@
 %%
-%% Copyright 2014-2015 Joaquim Rocha <jrocha@gmailbox.org>
+%% Copyright 2014-2016 Joaquim Rocha <jrocha@gmailbox.org>
 %% 
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -169,12 +169,10 @@ code_change(_OldVsn, State, _Extra) ->
 %% ====================================================================
 
 create_tables() ->
-	columbo_service:create(),
-	columbo_notify:create().
+	columbo_service:create().
 
 drop_tables() ->
-	columbo_service:drop(),
-	columbo_notify:drop().
+	columbo_service:drop().
 
 update_nodes(State=#state{known_nodes=KnownNodes}, Nodes) ->
 	NewNodes = lists:delete(node(), Nodes),
