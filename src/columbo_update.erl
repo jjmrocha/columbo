@@ -1,5 +1,5 @@
 %%
-%% Copyright 2015 Joaquim Rocha <jrocha@gmailbox.org>
+%% Copyright 2015-16 Joaquim Rocha <jrocha@gmailbox.org>
 %% 
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@ run(CurrentKnownNodes, CurrentOnlineNodes) ->
 	ServiceData = get_service_data(OnlineNodes, NodeData),
 	AllServices = get_all_services(ServiceData),
 	columbo_service:store(dict:to_list(AllServices)),
-	columbo_notify:notify(AllServices),
 	{KnownNodes, OnlineNodes}.
 
 %% ====================================================================
