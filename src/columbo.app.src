@@ -24,8 +24,7 @@
 	]},
 	{applications, [
 		kernel, 
-		stdlib,
-		event_broker
+		stdlib
 	]},
 	{mod, {columbo_app, []}},
 	{env, [
